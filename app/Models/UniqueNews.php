@@ -4,11 +4,15 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
-use Pgvector\Laravel\HasNeighbors; // <-- Import this
+use Pgvector\Laravel\HasNeighbors;
+use Pgvector\Laravel\Vector;
 
+/**
+ * @property Vector $embedding
+ */
 class UniqueNews extends Model
 {
-    use HasFactory, HasNeighbors; // <-- Add HasNeighbors
+    use HasFactory, HasNeighbors;
 
     protected $fillable = [
         'source_message_id',
@@ -18,9 +22,8 @@ class UniqueNews extends Model
         'embedding',
     ];
 
-    // Tell Eloquent that 'embedding' should be cast to a Vector object
     protected $casts = [
-        'embedding' => \Pgvector\Laravel\Vector::class,
+        'embedding' => Vector::class,
     ];
 
     public function sourceMessage()

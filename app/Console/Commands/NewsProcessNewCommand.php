@@ -21,8 +21,6 @@ class NewsProcessNewCommand extends Command
             ->chunkById(100, function ($messages) {
                 $this->info("Found {$messages->count()} new messages. Dispatching jobs...");
 
-                BareMessage::whereIn('id', $messages->pluck('id'))->update(['processed_at' => now()]);
-
                 foreach ($messages as $message) {
                     ProcessBareMessageJob::dispatch($message);
                 }

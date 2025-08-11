@@ -2,9 +2,15 @@
 
 namespace App\Services\AI;
 
-use Illuminate\Support\Facades\Http;
+use GuzzleHttp\Client;
+use GuzzleHttp\Exception\ConnectException;
+use GuzzleHttp\Exception\GuzzleException;
+use GuzzleHttp\HandlerStack;
+use GuzzleHttp\Middleware;
 use Illuminate\Support\Facades\Log;
 use Pgvector\Laravel\Vector;
+use Psr\Http\Message\RequestInterface;
+use Psr\Http\Message\ResponseInterface;
 
 class EmbeddingService
 {
@@ -14,8 +20,8 @@ class EmbeddingService
 
     public function __construct()
     {
-        $this->model = config('services.huggingface.embedding_model');
-        $this->apiUrl = "https://api-inference.huggingface.co/models/{$this->model}";
+        $this->model = 'sentence-transformers/all-mpnet-base-v2';
+        $this->apiUrl = "https://router.huggingface.co/hf-inference/models/{$this->model}/pipeline/feature-extraction";
         $this->apiToken = config('services.huggingface.api_token');
     }
 
@@ -28,27 +34,36 @@ class EmbeddingService
     public function getEmbedding(string $text): ?Vector
     {
         try {
-            // First, check if the model is loaded
-            $response = Http::withToken($this->apiToken)
-                ->timeout(120) // Increased timeout for model loading
-                ->retry(3, 5000) // Retry 3 times with 5 second delay
-                ->post($this->apiUrl, [
-                    'inputs' => $text, // Some models expect string, others array
+            $response = $this->getClient()->post($this->apiUrl, [
+                'headers' => [
+                    'Authorization' => "Bearer {$this->apiToken}",
+                    'Content-Type'  => 'application/json',
+                    'Accept'        => 'application/json',
+                ],
+                'json' => [
+                    'inputs'  => $text,
                     'options' => [
                         'wait_for_model' => true,
-                        'use_cache' => false
+                        'use_cache'      => false,
+                    ],
+                    'sentences' => [
+                        'درود'
                     ]
-                ]);
+                ],
+                'http_errors'    => false,
+                'timeout'        => 120,
+                'connect_timeout'=> 10,
+            ]);
 
-            if ($response->successful()) {
-                $responseData = $response->json();
-                
-                // Handle different response formats
-                if (is_array($responseData) && isset($responseData[0])) {
-                    // Response is array of embeddings
+            $status = $response->getStatusCode();
+            $body   = (string) $response->getBody();
+
+            if ($status >= 200 && $status < 300) {
+                $responseData = json_decode($body, true);
+
+                if (is_array($responseData) && array_is_list($responseData) && isset($responseData[0])) {
                     $embeddingArray = is_array($responseData[0]) ? $responseData[0] : $responseData;
                 } else {
-                    // Response is direct embedding array
                     $embeddingArray = $responseData;
                 }
 
@@ -56,26 +71,24 @@ class EmbeddingService
                     return new Vector($embeddingArray);
                 }
 
-                Log::error("Invalid embedding format received from Hugging Face API for model: {$this->model}");
+                Log::error("Invalid embedding format received from HF API for model: {$this->model}");
                 return null;
             }
 
-            // Log detailed error information
-            $errorBody = $response->body();
-            $statusCode = $response->status();
-            
-            Log::error("Hugging Face API Error: Status {$statusCode}, Body: {$errorBody}");
+            Log::error("Hugging Face API Error: Status {$status}, Body: {$body}");
             Log::error("Model used: {$this->model}");
             Log::error("API URL: {$this->apiUrl}");
 
-            // If model not found, suggest alternatives
-            if ($statusCode === 404) {
-                Log::error("Model '{$this->model}' not found. Consider using alternative Persian models like 'HooshvareLab/bert-base-parsbert-uncased' or 'sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2'");
+            if ($status === 404) {
+                Log::error("Model '{$this->model}' not found. Consider alternatives like 'intfloat/multilingual-e5-base' or 'sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2'.");
             }
 
             return null;
-
-        } catch (\Exception $e) {
+        } catch (GuzzleException $e) {
+            Log::error('Failed to get embedding (HTTP): ' . $e->getMessage());
+            Log::error('Model: ' . $this->model);
+            return null;
+        } catch (\Throwable $e) {
             Log::error('Failed to get embedding: ' . $e->getMessage());
             Log::error('Model: ' . $this->model);
             return null;
@@ -90,7 +103,7 @@ class EmbeddingService
     public function testModel(): bool
     {
         try {
-            $testText = "این یک متن تست است."; // "This is a test text." in Persian
+            $testText = "این یک متن تست است.";
             $embedding = $this->getEmbedding($testText);
             return $embedding !== null;
         } catch (\Exception $e) {
@@ -98,4 +111,44 @@ class EmbeddingService
             return false;
         }
     }
+
+    private function getClient(): Client
+    {
+        $stack = HandlerStack::create();
+
+        $decider = function (
+            int $retries,
+            RequestInterface $request,
+            ?ResponseInterface $response = null,
+            ?\Throwable $exception = null
+        ) {
+            if ($retries >= 3) {
+                return false;
+            }
+            if ($exception instanceof ConnectException) {
+                return true;
+            }
+            if ($response) {
+                $code = $response->getStatusCode();
+                if ($code === 429 || ($code >= 500 && $code <= 599)) {
+                    return true;
+                }
+            }
+            return false;
+        };
+
+        $delay = function (int $retries) {
+            return 5000;
+        };
+
+        $stack->push(Middleware::retry($decider, $delay));
+
+        return new Client([
+            'handler'         => $stack,
+            'timeout'         => 120,
+            'connect_timeout' => 10,
+            'http_errors'     => false,
+        ]);
+    }
+
 }

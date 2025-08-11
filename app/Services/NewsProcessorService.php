@@ -7,8 +7,7 @@ use App\Models\DuplicateLink;
 use App\Models\UniqueNews;
 use App\Services\AI\EmbeddingService;
 use Illuminate\Support\Facades\Log;
-// The Distance enum is no longer needed with this syntax
-// use Pgvector\Laravel\Distance;
+use Pgvector\Laravel\Distance;
 
 class NewsProcessorService
 {
@@ -40,7 +39,7 @@ class NewsProcessorService
 
         // Corrected line: Use the explicit cosineDistance method
         $mostSimilar = UniqueNews::query()
-            ->cosineDistance('embedding', $embedding)
+            ->nearestNeighbors('embedding', $embedding, Distance::Cosine)
             ->first();
 
         $distance = $mostSimilar ? $mostSimilar->distance : 2.0;
@@ -60,5 +59,7 @@ class NewsProcessorService
                 'embedding' => $embedding,
             ]);
         }
+
+        $message->update(['processed_at' => now()]);
     }
 }
