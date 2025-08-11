@@ -20,7 +20,7 @@ class EmbeddingService
 
     public function __construct()
     {
-        $this->model = 'sentence-transformers/all-mpnet-base-v2';
+        $this->model = config('services.huggingface.embedding_model');
         $this->apiUrl = "https://router.huggingface.co/hf-inference/models/{$this->model}/pipeline/feature-extraction";
         $this->apiToken = config('services.huggingface.api_token');
     }
