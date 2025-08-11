@@ -45,9 +45,6 @@ class EmbeddingService
                     'options' => [
                         'wait_for_model' => true,
                         'use_cache'      => false,
-                    ],
-                    'sentences' => [
-                        'درود'
                     ]
                 ],
                 'http_errors'    => false,
