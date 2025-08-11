@@ -1,0 +1,27 @@
+ARG PG_MAJOR=16
+ARG PGVECTOR_VERSION=v0.7.0  # change to the tag you want
+
+FROM postgres:${PG_MAJOR}-bookworm AS builder
+ARG PG_MAJOR
+ARG PGVECTOR_VERSION
+
+RUN apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      ca-certificates git build-essential curl \
+      postgresql-server-dev-${PG_MAJOR} && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+RUN git clone --depth 1 --branch ${PGVECTOR_VERSION} https://github.com/pgvector/pgvector.git .
+RUN make && make install
+
+FROM postgres:${PG_MAJOR}-bookworm
+
+ARG PG_MAJOR
+COPY --from=builder /usr/lib/postgresql/${PG_MAJOR}/lib/vector.so \
+                    /usr/lib/postgresql/${PG_MAJOR}/lib/vector.so
+COPY --from=builder /usr/share/postgresql/${PG_MAJOR}/extension/vector* \
+                    /usr/share/postgresql/${PG_MAJOR}/extension/
+
+COPY init.sh /docker-entrypoint-initdb.d/10-enable-pgvector.sh
+RUN chmod +x /docker-entrypoint-initdb.d/10-enable-pgvector.sh
